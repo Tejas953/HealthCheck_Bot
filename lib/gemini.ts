@@ -8,6 +8,13 @@ export interface GeminiRequest {
   maxTokens?: number;
 }
 
+export interface GeminiVisionRequest {
+  prompt: string;
+  imageBase64: string;
+  mimeType: string;
+  maxTokens?: number;
+}
+
 export interface GeminiResponse {
   text: string;
   success: boolean;
@@ -173,6 +180,84 @@ export class GeminiClient {
       success: false,
       error: lastError?.message || 'Failed after retries',
     };
+  }
+
+  /**
+   * Analyze an image using Gemini Vision API
+   * @param request - The request containing prompt, image data, and mime type
+   */
+  async analyzeImage(request: GeminiVisionRequest): Promise<GeminiResponse> {
+    // Use gemini-2.0-flash for vision (supports images)
+    const visionModel = 'gemini-2.0-flash';
+    console.log(`[Gemini Vision] Using model: ${visionModel}`);
+    console.log(`[Gemini Vision] Image size: ${Math.round(request.imageBase64.length / 1024)}KB`);
+    
+    try {
+      const url = `${GEMINI_API_URL}/${visionModel}:generateContent?key=${this.apiKey}`;
+      
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          contents: [
+            {
+              parts: [
+                {
+                  text: request.prompt,
+                },
+                {
+                  inline_data: {
+                    mime_type: request.mimeType,
+                    data: request.imageBase64,
+                  },
+                },
+              ],
+            },
+          ],
+          generationConfig: {
+            maxOutputTokens: request.maxTokens || 2000,
+            temperature: 0.1, // Lower temperature for more accurate extraction
+          },
+        }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        console.error('[Gemini Vision] API error:', response.status, errorData);
+        return {
+          text: '',
+          success: false,
+          error: `Gemini Vision API error: ${response.status} - ${errorData?.error?.message || 'Unknown error'}`,
+        };
+      }
+
+      const data = await response.json();
+      const text = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+      
+      if (!text) {
+        console.log('[Gemini Vision] Empty response');
+        return {
+          text: '',
+          success: false,
+          error: 'Empty response from Gemini Vision',
+        };
+      }
+      
+      console.log(`[Gemini Vision] Response received: ${text.length} characters`);
+      return {
+        text,
+        success: true,
+      };
+    } catch (error) {
+      console.error('[Gemini Vision] Error:', error);
+      return {
+        text: '',
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error',
+      };
+    }
   }
 }
 

@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { Send, Sparkles, RotateCcw, Bot, History, ChevronDown } from 'lucide-react';
+import { Send, Sparkles, RotateCcw, Bot, History, ChevronDown, Square } from 'lucide-react';
 import Message from './Message';
 import { ChatMessage, ChatResponse } from '@/utils/types';
 import { v4 as uuidv4 } from 'uuid';
@@ -41,6 +41,7 @@ export default function ChatInterface({ sessionId, reportName = 'Report', disabl
   const [showHistory, setShowHistory] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const abortControllerRef = useRef<AbortController | null>(null);
 
   // Create a new thread when sessionId changes
   useEffect(() => {
@@ -172,6 +173,17 @@ export default function ChatInterface({ sessionId, reportName = 'Report', disabl
       { id: assistantPlaceholderId, role: 'assistant', content: '', timestamp: new Date() },
     ]);
 
+    // Create new AbortController for this request
+    const abortController = new AbortController();
+    abortControllerRef.current = abortController;
+    let wasAborted = false;
+
+    // Listen for abort events
+    abortController.signal.addEventListener('abort', () => {
+      wasAborted = true;
+      console.log('[Chat] Request aborted via signal');
+    });
+
     try {
       const response = await fetch('/api/chat', {
         method: 'POST',
@@ -181,12 +193,28 @@ export default function ChatInterface({ sessionId, reportName = 'Report', disabl
           query: messageText.trim(),
           conversationHistory: messages.slice(-6).map(m => ({ role: m.role, content: m.content })),
         }),
+        signal: abortController.signal,
       });
+
+      // Check if request was aborted before processing response
+      if (wasAborted || abortController.signal.aborted || !abortControllerRef.current) {
+        throw new DOMException('Request aborted', 'AbortError');
+      }
 
       const data: ChatResponse = await response.json();
 
+      // Check again after JSON parsing (in case it was aborted during parsing)
+      if (wasAborted || abortController.signal.aborted || !abortControllerRef.current) {
+        throw new DOMException('Request aborted', 'AbortError');
+      }
+
       if (!response.ok || !data.success) {
         throw new Error(data.answer || 'Failed to get response');
+      }
+
+      // Final check before updating UI
+      if (wasAborted || abortController.signal.aborted || !abortControllerRef.current) {
+        throw new DOMException('Request aborted', 'AbortError');
       }
 
       setMessages(prev =>
@@ -205,6 +233,28 @@ export default function ChatInterface({ sessionId, reportName = 'Report', disabl
         setSuggestedQuestions(data.suggestedQuestions);
       }
     } catch (err) {
+      // Don't show error if request was aborted
+      const isAborted = wasAborted || 
+                       (err instanceof Error && (err.name === 'AbortError' || err.message === 'Request aborted')) ||
+                       (abortControllerRef.current === null);
+      
+      if (isAborted) {
+        const cancelledContent = 'Response cancelled by user.';
+        setMessages(prev =>
+          prev.map(msg =>
+            msg.id === assistantPlaceholderId
+              ? { ...msg, content: cancelledContent }
+              : msg
+          )
+        );
+        // Save cancelled message to thread
+        saveMessageToThread('assistant', cancelledContent);
+        setIsLoading(false);
+        abortControllerRef.current = null;
+        return;
+      }
+
+      // Only show error if not aborted
       const errorMessage = err instanceof Error ? err.message : 'Failed to send message';
       setError(errorMessage);
       const errorContent = `Sorry, I encountered an error: ${errorMessage}`;
@@ -218,9 +268,29 @@ export default function ChatInterface({ sessionId, reportName = 'Report', disabl
       // Save error message to thread
       saveMessageToThread('assistant', errorContent);
     } finally {
-      setIsLoading(false);
+      // Only clear loading state if not aborted (abort handler already cleared it)
+      if (!wasAborted && abortControllerRef.current) {
+        setIsLoading(false);
+        abortControllerRef.current = null;
+      }
     }
   }, [sessionId, messages, isLoading, disabled, threadId]);
+
+  const stopGeneration = useCallback(() => {
+    console.log('[Chat] Stop button clicked, aborting request...');
+    if (abortControllerRef.current) {
+      try {
+        abortControllerRef.current.abort();
+        console.log('[Chat] Request aborted successfully');
+        setIsLoading(false);
+        abortControllerRef.current = null;
+      } catch (error) {
+        console.error('[Chat] Error aborting request:', error);
+      }
+    } else {
+      console.log('[Chat] No active request to abort');
+    }
+  }, []);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -235,9 +305,15 @@ export default function ChatInterface({ sessionId, reportName = 'Report', disabl
   };
 
   const clearChat = () => {
+    // Stop any ongoing request
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+      abortControllerRef.current = null;
+    }
     setMessages([]);
     setError(null);
     setSuggestedQuestions([]);
+    setIsLoading(false);
     // Create a new thread for the fresh chat
     setThreadId(null);
     createNewThread();
@@ -403,15 +479,28 @@ export default function ChatInterface({ sessionId, reportName = 'Report', disabl
               <kbd className="px-1 py-0.5 rounded bg-white/5 border border-white/10 text-[10px]">↵</kbd>
             </div>
           </div>
-          <button
-            type="submit"
-            disabled={disabled || isLoading || !input.trim()}
-            className="btn-primary px-4 flex items-center justify-center min-w-[44px]"
-          >
-            <span className="relative z-10">
-              <Send className="w-4 h-4" />
-            </span>
-          </button>
+          {isLoading ? (
+            <button
+              type="button"
+              onClick={stopGeneration}
+              className="btn-primary px-4 flex items-center justify-center min-w-[44px] cursor-pointer"
+              title="Stop generation"
+            >
+              <span className="relative z-10">
+                <Square className="w-4 h-4 fill-current" />
+              </span>
+            </button>
+          ) : (
+            <button
+              type="submit"
+              disabled={disabled || !input.trim()}
+              className="btn-primary px-4 flex items-center justify-center min-w-[44px]"
+            >
+              <span className="relative z-10">
+                <Send className="w-4 h-4" />
+              </span>
+            </button>
+          )}
         </form>
         
         {messages.length > 0 && suggestedQuestions.length > 0 && !isLoading && (

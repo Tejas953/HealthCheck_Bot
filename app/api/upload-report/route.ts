@@ -4,7 +4,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { parseReport } from '@/utils/reportParser';
+import { parseReport, extractHealthCheckMetrics, extractMetricsWithVision } from '@/utils/reportParser';
 import { getReportStore } from '@/lib/reportStore';
 import { UploadResponse } from '@/utils/types';
 import { v4 as uuidv4 } from 'uuid';
@@ -131,6 +131,30 @@ export async function POST(request: NextRequest): Promise<NextResponse<UploadRes
     const sessionId = uuidv4();
     console.log(`[Upload] Created session: ${sessionId}`);
 
+    // Extract health check metrics
+    // For PDFs, use Gemini Vision for accurate extraction (can read pie charts!)
+    // For other formats, use text-based extraction
+    let metrics;
+    if (effectiveFileType === 'application/pdf') {
+      console.log('[Upload] Using Gemini Vision for PDF metric extraction...');
+      try {
+        metrics = await extractMetricsWithVision(buffer);
+        console.log('[Upload] Vision-extracted metrics:', metrics);
+        
+        // If vision extraction failed or returned empty, fall back to text extraction
+        if (!metrics || Object.keys(metrics).length === 0) {
+          console.log('[Upload] Vision extraction returned empty, falling back to text...');
+          metrics = extractHealthCheckMetrics(parsedDocument.rawText);
+        }
+      } catch (visionError) {
+        console.error('[Upload] Vision extraction error, falling back to text:', visionError);
+        metrics = extractHealthCheckMetrics(parsedDocument.rawText);
+      }
+    } else {
+      metrics = extractHealthCheckMetrics(parsedDocument.rawText);
+    }
+    console.log(`[Upload] Final extracted metrics:`, metrics);
+
     // Store the report
     const reportStore = getReportStore();
     reportStore.store(sessionId, file.name, parsedDocument.rawText);
@@ -143,6 +167,7 @@ export async function POST(request: NextRequest): Promise<NextResponse<UploadRes
       filename: file.name,
       chunksCreated: 1,
       message: 'Report uploaded and processed successfully',
+      metrics, // Include extracted metrics
     });
 
   } catch (error) {

@@ -42,6 +42,20 @@ export interface Citation {
   relevanceScore: number;
 }
 
+// Health Check Metrics from report page 1
+export interface HealthCheckMetrics {
+  organization?: string;
+  stack?: string;
+  runBy?: string;
+  lastRun?: string;
+  totalChecks?: number;
+  performedChecks?: number;
+  skippedChecks?: number;
+  actionsRequired?: number;
+  areasOfOpportunities?: number;
+  strengths?: number;
+}
+
 // API response types
 export interface UploadResponse {
   success: boolean;
@@ -49,6 +63,7 @@ export interface UploadResponse {
   filename: string;
   chunksCreated: number;
   message: string;
+  metrics?: HealthCheckMetrics;
 }
 
 export interface SummarizeResponse {

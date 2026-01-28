@@ -10,9 +10,16 @@ import {
   Target,
   Copy,
   Check,
-  ChevronDown,
-  ChevronUp
+  Award,
+  Lightbulb
 } from 'lucide-react';
+
+// Health Check Metrics from dashboard
+interface HealthCheckMetrics {
+  strengths?: number;
+  areasOfOpportunities?: number;
+  actionsRequired?: number;
+}
 
 interface SummaryProps {
   summary: string;
@@ -21,7 +28,10 @@ interface SummaryProps {
   riskAreas: string[];
   isLoading: boolean;
   error?: string;
+  healthCheckMetrics?: HealthCheckMetrics; // Add health check metrics
 }
+
+type TabType = 'overview' | 'strengths' | 'opportunities' | 'actions';
 
 export default function Summary({
   summary,
@@ -30,34 +40,36 @@ export default function Summary({
   riskAreas,
   isLoading,
   error,
+  healthCheckMetrics,
 }: SummaryProps) {
   const [copied, setCopied] = useState(false);
-  const [expandedSections, setExpandedSections] = useState({
-    overview: true,
-    findings: true,
-    risks: true,
-    actions: true,
-  });
-
-  const toggleSection = (section: keyof typeof expandedSections) => {
-    setExpandedSections(prev => ({ ...prev, [section]: !prev[section] }));
-  };
+  const [activeTab, setActiveTab] = useState<TabType>('overview');
 
   const handleCopy = async () => {
+    const strengthsCount = healthCheckMetrics?.strengths ?? keyFindings.length;
+    const oppsCount = healthCheckMetrics?.areasOfOpportunities ?? riskAreas.length;
+    const actionsCount = healthCheckMetrics?.actionsRequired ?? recommendations.length;
+    
     const text = `
-HEALTH CHECK SUMMARY
-====================
+HEALTH CHECK ANALYSIS REPORT
+============================
 
+OVERVIEW:
 ${summary}
 
-KEY FINDINGS:
-${keyFindings.map(f => `• ${f}`).join('\n')}
+METRICS SUMMARY:
+• Strengths: ${strengthsCount} (Well configured)
+• Opportunities: ${oppsCount} (Can be improved)
+• Actions Required: ${actionsCount} (Need attention)
 
-ISSUES & RISKS:
-${riskAreas.map(r => `• ${r}`).join('\n')}
+STRENGTHS (${strengthsCount} items well configured):
+${keyFindings.map(f => `✓ ${f}`).join('\n')}
 
-RECOMMENDATIONS:
-${recommendations.map(r => `• ${r}`).join('\n')}
+OPPORTUNITIES (${oppsCount} areas for improvement):
+${riskAreas.map(r => `○ ${r}`).join('\n')}
+
+ACTIONS REQUIRED (${actionsCount} items need attention):
+${recommendations.map(r => `! ${r}`).join('\n')}
     `.trim();
     
     await navigator.clipboard.writeText(text);
@@ -105,6 +117,43 @@ ${recommendations.map(r => `• ${r}`).join('\n')}
     );
   }
 
+  // Tab configuration
+  const tabs: Array<{
+    id: TabType;
+    label: string;
+    icon: React.ReactNode;
+    count?: number;
+    color: string;
+  }> = [
+    {
+      id: 'overview',
+      label: 'Overview',
+      icon: <FileText className="w-4 h-4" />,
+      color: 'indigo',
+    },
+    {
+      id: 'strengths',
+      label: 'Strengths',
+      icon: <Award className="w-4 h-4" />,
+      count: healthCheckMetrics?.strengths ?? keyFindings.length,
+      color: 'emerald',
+    },
+    {
+      id: 'opportunities',
+      label: 'Opportunities',
+      icon: <Lightbulb className="w-4 h-4" />,
+      count: healthCheckMetrics?.areasOfOpportunities ?? riskAreas.length,
+      color: 'amber',
+    },
+    {
+      id: 'actions',
+      label: 'Actions Required',
+      icon: <AlertTriangle className="w-4 h-4" />,
+      count: healthCheckMetrics?.actionsRequired ?? recommendations.length,
+      color: 'red',
+    },
+  ];
+
   return (
     <div className="bg-gray-900 rounded-2xl border border-gray-800 h-full flex flex-col overflow-hidden">
       {/* Header */}
@@ -119,159 +168,213 @@ ${recommendations.map(r => `• ${r}`).join('\n')}
         </button>
       </div>
 
-      {/* Stats Bar */}
-      <div className="grid grid-cols-3 gap-4 p-4 border-b border-gray-800 bg-gray-800/50">
-        <div className="text-center">
-          <div className="text-2xl font-bold text-emerald-400">{keyFindings.length}</div>
-          <div className="text-xs text-gray-400">Findings</div>
-        </div>
-        <div className="text-center">
-          <div className="text-2xl font-bold text-amber-400">{riskAreas.length}</div>
-          <div className="text-xs text-gray-400">Issues</div>
-        </div>
-        <div className="text-center">
-          <div className="text-2xl font-bold text-indigo-400">{recommendations.length}</div>
-          <div className="text-xs text-gray-400">Actions</div>
+      {/* Tab Navigation */}
+      <div className="border-b border-gray-800 bg-gray-800/30">
+        <div className="flex overflow-x-auto">
+          {tabs.map((tab) => {
+            const isActive = activeTab === tab.id;
+            
+            // Get color classes based on tab color
+            let activeClasses = '';
+            let badgeClasses = '';
+            
+            if (isActive) {
+              switch (tab.color) {
+                case 'indigo':
+                  activeClasses = 'bg-indigo-500/20 text-indigo-400 border-indigo-500';
+                  badgeClasses = 'bg-indigo-500/30 text-indigo-300';
+                  break;
+                case 'emerald':
+                  activeClasses = 'bg-emerald-500/20 text-emerald-400 border-emerald-500';
+                  badgeClasses = 'bg-emerald-500/30 text-emerald-300';
+                  break;
+                case 'amber':
+                  activeClasses = 'bg-amber-500/20 text-amber-400 border-amber-500';
+                  badgeClasses = 'bg-amber-500/30 text-amber-300';
+                  break;
+                case 'red':
+                  activeClasses = 'bg-red-500/20 text-red-400 border-red-500';
+                  badgeClasses = 'bg-red-500/30 text-red-300';
+                  break;
+              }
+            } else {
+              activeClasses = 'text-gray-400 hover:text-gray-300 hover:bg-gray-800/50';
+              badgeClasses = 'bg-gray-700 text-gray-500';
+            }
+
+            return (
+              <button
+                key={tab.id}
+                onClick={() => setActiveTab(tab.id)}
+                className={`
+                  flex items-center gap-2 px-4 py-3 text-sm font-medium transition-all duration-200
+                  border-b-2 border-transparent whitespace-nowrap
+                  ${activeClasses}
+                `}
+              >
+                {tab.icon}
+                <span>{tab.label}</span>
+                {tab.count !== undefined && (
+                  <span className={`px-2 py-0.5 rounded-full text-xs font-semibold ${badgeClasses}`}>
+                    {tab.count}
+                  </span>
+                )}
+              </button>
+            );
+          })}
         </div>
       </div>
 
-      {/* Content - Scrollable */}
-      <div className="flex-1 overflow-y-auto p-4 space-y-4">
-        
-        {/* Overview Section */}
-        <div className="bg-gray-800/50 rounded-xl overflow-hidden">
-          <button
-            onClick={() => toggleSection('overview')}
-            className="w-full p-4 flex items-center justify-between hover:bg-gray-800 transition-colors"
-          >
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-lg bg-indigo-500/20 flex items-center justify-center">
-                <FileText className="w-5 h-5 text-indigo-400" />
-              </div>
-              <span className="font-medium text-white">Overview</span>
+      {/* Tab Content Container - Fixed height, no scroll on parent */}
+      <div className="flex-1 overflow-hidden flex flex-col min-h-0">
+        {/* Overview Tab - Internal Scroll */}
+        {activeTab === 'overview' && (
+          <div className="h-full overflow-y-auto p-4">
+            <div className="space-y-4">
+              {summary && (
+                <div className="bg-gradient-to-br from-indigo-500/10 to-purple-500/10 rounded-xl p-4 border border-indigo-500/20">
+                  <div className="flex items-center gap-3 mb-3">
+                    <div className="w-10 h-10 rounded-lg bg-indigo-500/20 flex items-center justify-center">
+                      <FileText className="w-5 h-5 text-indigo-400" />
+                    </div>
+                    <h3 className="font-semibold text-white">Client Feedback</h3>
+                  </div>
+                  <p className="text-gray-300 leading-relaxed whitespace-pre-wrap text-sm">
+                    {summary}
+                  </p>
+                </div>
+              )}
             </div>
-            {expandedSections.overview ? 
-              <ChevronUp className="w-5 h-5 text-gray-400" /> : 
-              <ChevronDown className="w-5 h-5 text-gray-400" />
-            }
-          </button>
-          {expandedSections.overview && (
-            <div className="px-4 pb-4">
-              <p className="text-gray-300 leading-relaxed whitespace-pre-wrap">{summary}</p>
-            </div>
-          )}
-        </div>
+          </div>
+        )}
 
-        {/* Key Findings Section */}
-        {keyFindings.length > 0 && (
-          <div className="bg-gray-800/50 rounded-xl overflow-hidden">
-            <button
-              onClick={() => toggleSection('findings')}
-              className="w-full p-4 flex items-center justify-between hover:bg-gray-800 transition-colors"
-            >
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-lg bg-emerald-500/20 flex items-center justify-center">
-                  <CheckCircle className="w-5 h-5 text-emerald-400" />
+        {/* Strengths Tab - Internal Scroll */}
+        {activeTab === 'strengths' && keyFindings.length > 0 && (
+          <div className="h-full overflow-y-auto p-4">
+            <div className="space-y-4">
+              <div className="bg-gray-800/50 rounded-xl p-4 border-l-4 border-emerald-500">
+                <div className="flex items-center gap-3 mb-4">
+                  <div className="w-10 h-10 rounded-lg bg-emerald-500/20 flex items-center justify-center">
+                    <Award className="w-5 h-5 text-emerald-400" />
+                  </div>
+                  <div>
+                    <h3 className="font-semibold text-white">Strengths Analysis</h3>
+                    <p className="text-xs text-emerald-400/70 mt-1">
+                      {healthCheckMetrics?.strengths ?? keyFindings.length} areas well configured
+                    </p>
+                  </div>
                 </div>
-                <div>
-                  <span className="font-medium text-white">Key Findings</span>
-                  <span className="ml-2 text-sm text-gray-500">({keyFindings.length})</span>
-                </div>
-              </div>
-              {expandedSections.findings ? 
-                <ChevronUp className="w-5 h-5 text-gray-400" /> : 
-                <ChevronDown className="w-5 h-5 text-gray-400" />
-              }
-            </button>
-            {expandedSections.findings && (
-              <div className="px-4 pb-4 max-h-64 overflow-y-auto">
-                <ul className="space-y-2">
+                <p className="text-xs text-gray-500 mb-4 pb-3 border-b border-gray-700">
+                  These areas are well configured and working optimally:
+                </p>
+                <ul className="space-y-3">
                   {keyFindings.map((finding, index) => (
-                    <li key={index} className="flex items-start gap-3 py-2 border-b border-gray-700/50 last:border-0">
-                      <span className="w-6 h-6 rounded-full bg-emerald-500/20 flex items-center justify-center flex-shrink-0 mt-0.5">
-                        <span className="text-xs text-emerald-400">{index + 1}</span>
+                    <li key={index} className="flex items-start gap-3 p-3 rounded-lg bg-emerald-500/5 border border-emerald-500/10">
+                      <span className="w-6 h-6 rounded-full bg-emerald-500/20 flex items-center justify-center flex-shrink-0 mt-0.5 border border-emerald-500/30">
+                        <CheckCircle className="w-3.5 h-3.5 text-emerald-400" />
                       </span>
-                      <span className="text-gray-300 text-sm">{finding}</span>
+                      <span className="text-gray-300 text-sm leading-relaxed flex-1">{finding}</span>
                     </li>
                   ))}
                 </ul>
               </div>
-            )}
+            </div>
           </div>
         )}
 
-        {/* Issues & Risks Section */}
-        {riskAreas.length > 0 && (
-          <div className="bg-gray-800/50 rounded-xl overflow-hidden">
-            <button
-              onClick={() => toggleSection('risks')}
-              className="w-full p-4 flex items-center justify-between hover:bg-gray-800 transition-colors"
-            >
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-lg bg-amber-500/20 flex items-center justify-center">
-                  <AlertTriangle className="w-5 h-5 text-amber-400" />
+        {/* Opportunities Tab - Internal Scroll */}
+        {activeTab === 'opportunities' && riskAreas.length > 0 && (
+          <div className="h-full overflow-y-auto p-4">
+            <div className="space-y-4">
+              <div className="bg-gray-800/50 rounded-xl p-4 border-l-4 border-amber-500">
+                <div className="flex items-center gap-3 mb-4">
+                  <div className="w-10 h-10 rounded-lg bg-amber-500/20 flex items-center justify-center">
+                    <Lightbulb className="w-5 h-5 text-amber-400" />
+                  </div>
+                  <div>
+                    <h3 className="font-semibold text-white">Opportunities Analysis</h3>
+                    <p className="text-xs text-amber-400/70 mt-1">
+                      {healthCheckMetrics?.areasOfOpportunities ?? riskAreas.length} areas can be improved
+                    </p>
+                  </div>
                 </div>
-                <div>
-                  <span className="font-medium text-white">Issues & Risks</span>
-                  <span className="ml-2 text-sm text-gray-500">({riskAreas.length})</span>
-                </div>
-              </div>
-              {expandedSections.risks ? 
-                <ChevronUp className="w-5 h-5 text-gray-400" /> : 
-                <ChevronDown className="w-5 h-5 text-gray-400" />
-              }
-            </button>
-            {expandedSections.risks && (
-              <div className="px-4 pb-4 max-h-64 overflow-y-auto">
-                <ul className="space-y-2">
+                <p className="text-xs text-gray-500 mb-4 pb-3 border-b border-gray-700">
+                  These areas have room for improvement and optimization:
+                </p>
+                <ul className="space-y-3">
                   {riskAreas.map((risk, index) => (
-                    <li key={index} className="flex items-start gap-3 py-2 border-b border-gray-700/50 last:border-0">
-                      <span className="w-2 h-2 rounded-full bg-amber-400 mt-2 flex-shrink-0" />
-                      <span className="text-gray-300 text-sm">{risk}</span>
+                    <li key={index} className="flex items-start gap-3 p-3 rounded-lg bg-amber-500/5 border border-amber-500/10">
+                      <span className="w-6 h-6 rounded-full bg-amber-500/20 flex items-center justify-center flex-shrink-0 mt-0.5 border border-amber-500/30">
+                        <Lightbulb className="w-3.5 h-3.5 text-amber-400" />
+                      </span>
+                      <span className="text-gray-300 text-sm leading-relaxed flex-1">{risk}</span>
                     </li>
                   ))}
                 </ul>
               </div>
-            )}
+            </div>
           </div>
         )}
 
-        {/* Recommendations Section */}
-        {recommendations.length > 0 && (
-          <div className="bg-gray-800/50 rounded-xl overflow-hidden">
-            <button
-              onClick={() => toggleSection('actions')}
-              className="w-full p-4 flex items-center justify-between hover:bg-gray-800 transition-colors"
-            >
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-lg bg-indigo-500/20 flex items-center justify-center">
-                  <Target className="w-5 h-5 text-indigo-400" />
+        {/* Actions Required Tab - Internal Scroll */}
+        {activeTab === 'actions' && recommendations.length > 0 && (
+          <div className="h-full overflow-y-auto p-4">
+            <div className="space-y-4">
+              <div className="bg-gray-800/50 rounded-xl p-4 border-l-4 border-red-500">
+                <div className="flex items-center gap-3 mb-4">
+                  <div className="w-10 h-10 rounded-lg bg-red-500/20 flex items-center justify-center">
+                    <AlertTriangle className="w-5 h-5 text-red-400" />
+                  </div>
+                  <div>
+                    <h3 className="font-semibold text-white">Actions Required</h3>
+                    <p className="text-xs text-red-400/70 mt-1">
+                      {healthCheckMetrics?.actionsRequired ?? recommendations.length} items need attention
+                    </p>
+                  </div>
                 </div>
-                <div>
-                  <span className="font-medium text-white">What to Fix</span>
-                  <span className="ml-2 text-sm text-gray-500">({recommendations.length})</span>
-                </div>
-              </div>
-              {expandedSections.actions ? 
-                <ChevronUp className="w-5 h-5 text-gray-400" /> : 
-                <ChevronDown className="w-5 h-5 text-gray-400" />
-              }
-            </button>
-            {expandedSections.actions && (
-              <div className="px-4 pb-4 max-h-72 overflow-y-auto">
-                <ul className="space-y-2">
+                <p className="text-xs text-gray-500 mb-4 pb-3 border-b border-gray-700">
+                  These items need immediate attention and action:
+                </p>
+                <ul className="space-y-3">
                   {recommendations.map((rec, index) => (
-                    <li key={index} className="flex items-start gap-3 py-2 border-b border-gray-700/50 last:border-0">
-                      <span className="w-2 h-2 rounded-full bg-indigo-400 mt-2 flex-shrink-0" />
-                      <span className="text-gray-300 text-sm">{rec}</span>
+                    <li key={index} className="flex items-start gap-3 p-3 rounded-lg bg-red-500/5 border border-red-500/10">
+                      <span className="w-6 h-6 rounded-full bg-red-500/20 flex items-center justify-center flex-shrink-0 mt-0.5 border border-red-500/30">
+                        <Target className="w-3.5 h-3.5 text-red-400" />
+                      </span>
+                      <span className="text-gray-300 text-sm leading-relaxed flex-1">{rec}</span>
                     </li>
                   ))}
                 </ul>
               </div>
-            )}
+            </div>
           </div>
         )}
 
+        {/* Empty States - Internal Scroll */}
+        {activeTab === 'strengths' && keyFindings.length === 0 && (
+          <div className="h-full overflow-y-auto p-4 flex items-center justify-center">
+            <div className="text-center py-12 text-gray-500">
+              <Award className="w-12 h-12 mx-auto mb-3 opacity-50" />
+              <p>No strengths data available</p>
+            </div>
+          </div>
+        )}
+        {activeTab === 'opportunities' && riskAreas.length === 0 && (
+          <div className="h-full overflow-y-auto p-4 flex items-center justify-center">
+            <div className="text-center py-12 text-gray-500">
+              <Lightbulb className="w-12 h-12 mx-auto mb-3 opacity-50" />
+              <p>No opportunities data available</p>
+            </div>
+          </div>
+        )}
+        {activeTab === 'actions' && recommendations.length === 0 && (
+          <div className="h-full overflow-y-auto p-4 flex items-center justify-center">
+            <div className="text-center py-12 text-gray-500">
+              <AlertTriangle className="w-12 h-12 mx-auto mb-3 opacity-50" />
+              <p>No actions required</p>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

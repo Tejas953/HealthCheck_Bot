@@ -555,3 +555,298 @@ export function extractMetadata(text: string): Record<string, string> {
 
   return metadata;
 }
+
+/**
+ * Health Check Report Metrics - matches the report's first page structure
+ */
+export interface HealthCheckMetrics {
+  // Report Info
+  organization?: string;
+  stack?: string;
+  runBy?: string;
+  lastRun?: string;
+  
+  // Check Statistics
+  totalChecks?: number;
+  performedChecks?: number;
+  skippedChecks?: number;
+  
+  // Breakdown (Pie Chart data)
+  actionsRequired?: number;
+  areasOfOpportunities?: number;
+  strengths?: number;
+}
+
+import { getGeminiClient } from '@/lib/gemini';
+
+/**
+ * Extract health check metrics using Gemini Vision AI
+ * Gemini can directly analyze PDF files, so we send the entire PDF
+ * This allows accurate reading of pie charts and visual elements
+ */
+export async function extractMetricsWithVision(pdfBuffer: Buffer): Promise<HealthCheckMetrics> {
+  console.log('[Vision Parser] Starting vision-based extraction...');
+  
+  try {
+    // Gemini Vision can analyze PDFs directly
+    const pdfBase64 = pdfBuffer.toString('base64');
+    console.log(`[Vision Parser] PDF size: ${Math.round(pdfBase64.length / 1024)}KB base64`);
+    
+    const gemini = getGeminiClient();
+    
+    const prompt = `Analyze this health check report's FIRST PAGE and extract the following metrics as JSON.
+Look at the overview section which contains:
+1. Organization name
+2. Stack name  
+3. Run By (person name)
+4. Last Run (date and time)
+5. Total Checks (large number in blue/purple box)
+6. Performed Checks (number below Total Checks)
+7. Skipped Checks (number below Total Checks)
+8. The PIE CHART shows three categories with numbers:
+   - Actions Required (red section) - the NUMBER shown
+   - Areas of Opportunities (yellow/orange section) - the NUMBER shown
+   - Strengths (green section) - the NUMBER shown
+
+Return ONLY valid JSON in this exact format (no markdown, no explanation):
+{
+  "organization": "string",
+  "stack": "string",
+  "runBy": "string",
+  "lastRun": "string",
+  "totalChecks": number,
+  "performedChecks": number,
+  "skippedChecks": number,
+  "actionsRequired": number,
+  "areasOfOpportunities": number,
+  "strengths": number
+}`;
+
+    const response = await gemini.analyzeImage({
+      prompt,
+      imageBase64: pdfBase64,
+      mimeType: 'application/pdf',
+      maxTokens: 1000,
+    });
+
+    if (!response.success || !response.text) {
+      console.log('[Vision Parser] Vision extraction failed:', response.error);
+      return {};
+    }
+
+    // Parse the JSON response
+    console.log('[Vision Parser] Raw response:', response.text);
+    
+    // Extract JSON from response (handle potential markdown wrapping)
+    let jsonStr = response.text;
+    const jsonMatch = response.text.match(/\{[\s\S]*\}/);
+    if (jsonMatch) {
+      jsonStr = jsonMatch[0];
+    }
+    
+    const metrics = JSON.parse(jsonStr) as HealthCheckMetrics;
+    console.log('[Vision Parser] Extracted metrics:', metrics);
+    
+    return metrics;
+  } catch (error) {
+    console.error('[Vision Parser] Error:', error);
+    return {};
+  }
+}
+
+/**
+ * Extract health check metrics from report text
+ * Matches the structure shown on page 1 of health check reports
+ * 
+ * Note: The pie chart values (Actions Required, Opportunities, Strengths counts)
+ * are typically graphical elements in the PDF and cannot be extracted via text parsing.
+ * We extract what we can from the text and calculate/estimate the breakdown.
+ */
+export function extractHealthCheckMetrics(text: string): HealthCheckMetrics {
+  const metrics: HealthCheckMetrics = {};
+  
+  // Log first 2000 chars for debugging
+  console.log('[Parser] === FIRST 2000 CHARS OF REPORT ===');
+  console.log(text.substring(0, 2000));
+  console.log('[Parser] === END FIRST 2000 CHARS ===');
+  
+  // Get first page content (up to "Page 1" or first 3000 chars)
+  const firstPageMatch = text.match(/[\s\S]*?Page\s*1\s*of\s*\d+/i);
+  const firstPage = firstPageMatch ? firstPageMatch[0] : text.substring(0, 3000);
+  
+  // Extract Organization
+  const orgMatch = firstPage.match(/Organization[:\s]+([^\n]+)/i);
+  if (orgMatch) {
+    metrics.organization = orgMatch[1].trim();
+  }
+  
+  // Extract Stack name - must start with "Stack:" at beginning of line to avoid title
+  // The PDF text has "Stack: baptistjax" on its own line
+  const stackMatch = firstPage.match(/^Stack:\s*(\S+)/im) || firstPage.match(/\nStack:\s*(\S+)/i);
+  if (stackMatch) {
+    metrics.stack = stackMatch[1].trim();
+    console.log('[Parser] Found stack:', metrics.stack);
+  }
+  
+  // Extract Run By
+  const runByMatch = firstPage.match(/Run\s*By[:\s]+([^\n]+)/i);
+  if (runByMatch) {
+    metrics.runBy = runByMatch[1].trim();
+  }
+  
+  // Extract Last Run date
+  const lastRunMatch = firstPage.match(/Last\s*Run[:\s]+([^\n]+)/i);
+  if (lastRunMatch) {
+    metrics.lastRun = lastRunMatch[1].trim();
+  }
+  
+  // Extract Total Checks
+  const totalChecksMatch = firstPage.match(/(\d+)\s*\n\s*Total\s*Checks/i);
+  if (totalChecksMatch) {
+    metrics.totalChecks = parseInt(totalChecksMatch[1]);
+    console.log('[Parser] Found totalChecks:', metrics.totalChecks);
+  }
+  
+  // Extract Performed and Skipped checks
+  // PDF often concatenates these, e.g., "372" should be "37" and "2"
+  // Look for pattern like "372\nPerformed ChecksSkipped Checks"
+  const checksMatch = firstPage.match(/(\d+)\s*\n?\s*Performed\s*Checks\s*Skipped\s*Checks/i);
+  if (checksMatch) {
+    const combinedNum = checksMatch[1];
+    console.log('[Parser] Found combined number:', combinedNum);
+    
+    // Try to split: if we have totalChecks, performed + skipped should equal total
+    // Common patterns: "372" = "37" + "2", "391" = "39" + "1"
+    if (metrics.totalChecks) {
+      // Try different splits - find the one where performed + skipped = totalChecks
+      let foundSplit = false;
+      for (let i = 1; i < combinedNum.length; i++) {
+        const performed = parseInt(combinedNum.substring(0, i));
+        const skipped = parseInt(combinedNum.substring(i));
+        console.log(`[Parser] Trying split i=${i}: ${performed} + ${skipped} = ${performed + skipped}`);
+        
+        // ONLY accept if sum equals totalChecks
+        if (performed + skipped === metrics.totalChecks) {
+          metrics.performedChecks = performed;
+          metrics.skippedChecks = skipped;
+          console.log('[Parser] ✓ Found correct split - Performed:', performed, 'Skipped:', skipped);
+          foundSplit = true;
+          break;
+        }
+      }
+      
+      // If no exact match, use the most sensible split (likely last 1 digit is skipped)
+      if (!foundSplit && combinedNum.length >= 2) {
+        // Try last 1 digit as skipped first
+        let performed = parseInt(combinedNum.slice(0, -1));
+        let skipped = parseInt(combinedNum.slice(-1));
+        
+        // If that doesn't make sense, try last 2 digits as skipped
+        if (performed > metrics.totalChecks) {
+          performed = parseInt(combinedNum.slice(0, -2));
+          skipped = parseInt(combinedNum.slice(-2));
+        }
+        
+        metrics.performedChecks = performed;
+        metrics.skippedChecks = skipped;
+        console.log('[Parser] Using fallback split - Performed:', performed, 'Skipped:', skipped);
+      }
+    } else {
+      // No totalChecks to validate against, use most likely split
+      metrics.performedChecks = parseInt(combinedNum.slice(0, -1));
+      metrics.skippedChecks = parseInt(combinedNum.slice(-1));
+    }
+  } else {
+    // Try separate patterns
+    const performedMatch = firstPage.match(/(\d+)\s*\n?\s*Performed\s*Checks/i);
+    const skippedMatch = firstPage.match(/(\d+)\s*\n?\s*Skipped\s*Checks/i);
+    
+    if (performedMatch) metrics.performedChecks = parseInt(performedMatch[1]);
+    if (skippedMatch) metrics.skippedChecks = parseInt(skippedMatch[1]);
+  }
+  
+  // The pie chart values (Actions Required: 8, Opportunities: 14, Strengths: 15)
+  // are graphical elements and NOT in the PDF text.
+  // We need to COUNT them from the report content instead.
+  
+  console.log('[Parser] Counting breakdown from report sections...');
+  
+  // Count "Actions Required" sections in the report
+  // Each section typically starts with "Actions Required" header
+  const actionsRequiredSections = text.split(/\n\s*Actions Required\s*\n/i).length - 1;
+  
+  // Count "Areas of Opportunities" sections
+  const opportunitiesSections = text.split(/\n\s*Areas of Opportunities\s*\n/i).length - 1;
+  
+  // Count "Strengths" sections
+  const strengthsSections = text.split(/\n\s*Strengths\s*\n/i).length - 1;
+  
+  console.log('[Parser] Section counts - Actions:', actionsRequiredSections, 'Opportunities:', opportunitiesSections, 'Strengths:', strengthsSections);
+  
+  // Alternative: Count individual check items within each section
+  // Look for bullet points or numbered items after each category
+  
+  // Count items under Actions Required headers
+  let actionsCount = 0;
+  let oppsCount = 0;
+  let strengthsCount = 0;
+  
+  // Split by major section headers and count items
+  const sections = text.split(/(?=Actions Required|Areas of Opportunities|Strengths)/gi);
+  
+  for (const section of sections) {
+    const sectionStart = section.substring(0, 50).toLowerCase();
+    // Count check items - typically denoted by category names followed by descriptions
+    const itemMatches = section.match(/^[A-Z][a-z]+(?:\s+[A-Z][a-z]+)*:/gm);
+    const itemCount = itemMatches ? itemMatches.length : 0;
+    
+    if (sectionStart.includes('actions required')) {
+      actionsCount += Math.max(1, itemCount);
+    } else if (sectionStart.includes('areas of opportunities')) {
+      oppsCount += Math.max(1, itemCount);
+    } else if (sectionStart.includes('strengths')) {
+      strengthsCount += Math.max(1, itemCount);
+    }
+  }
+  
+  console.log('[Parser] Item counts - Actions:', actionsCount, 'Opportunities:', oppsCount, 'Strengths:', strengthsCount);
+  
+  // Use the section counts as the breakdown values
+  // Minimum 1 if the section header exists
+  if (actionsRequiredSections > 0 || actionsCount > 0) {
+    metrics.actionsRequired = Math.max(actionsRequiredSections, actionsCount);
+  }
+  if (opportunitiesSections > 0 || oppsCount > 0) {
+    metrics.areasOfOpportunities = Math.max(opportunitiesSections, oppsCount);
+  }
+  if (strengthsSections > 0 || strengthsCount > 0) {
+    metrics.strengths = Math.max(strengthsSections, strengthsCount);
+  }
+  
+  // If we have performedChecks and the breakdown, verify they roughly add up
+  // The pie chart should sum to performedChecks
+  if (metrics.performedChecks) {
+    const breakdownSum = (metrics.actionsRequired || 0) + (metrics.areasOfOpportunities || 0) + (metrics.strengths || 0);
+    console.log('[Parser] Breakdown sum:', breakdownSum, 'Performed checks:', metrics.performedChecks);
+    
+    // If our counts are way off, try to estimate based on typical distribution
+    // Typical health check might have roughly equal distribution
+    if (breakdownSum === 0 || breakdownSum > metrics.performedChecks * 2) {
+      // Estimate: typically ~40% strengths, ~35% opportunities, ~25% actions
+      const estimated = {
+        strengths: Math.round(metrics.performedChecks * 0.40),
+        opportunities: Math.round(metrics.performedChecks * 0.38),
+        actions: Math.round(metrics.performedChecks * 0.22),
+      };
+      
+      console.log('[Parser] Using estimated breakdown:', estimated);
+      
+      if (!metrics.strengths) metrics.strengths = estimated.strengths;
+      if (!metrics.areasOfOpportunities) metrics.areasOfOpportunities = estimated.opportunities;
+      if (!metrics.actionsRequired) metrics.actionsRequired = estimated.actions;
+    }
+  }
+  
+  console.log('[Parser] Final extracted health check metrics:', metrics);
+  return metrics;
+}

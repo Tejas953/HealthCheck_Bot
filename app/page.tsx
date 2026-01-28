@@ -17,6 +17,7 @@ import {
 import FileUpload from '@/components/FileUpload';
 import Summary from '@/components/Summary';
 import ChatInterface from '@/components/ChatInterface';
+import MetricsDashboard, { HealthCheckMetrics } from '@/components/MetricsDashboard';
 
 interface SummaryData {
   summary: string;
@@ -32,20 +33,30 @@ export default function Home() {
   const [summaryLoading, setSummaryLoading] = useState(false);
   const [summaryError, setSummaryError] = useState<string>('');
   const [uploadError, setUploadError] = useState<string>('');
+  const [metrics, setMetrics] = useState<HealthCheckMetrics | null>(null);
 
-  const handleUploadSuccess = useCallback(async (newSessionId: string, uploadedFilename: string) => {
+  const handleUploadSuccess = useCallback(async (newSessionId: string, uploadedFilename: string, extractedMetrics?: HealthCheckMetrics) => {
     setSessionId(newSessionId);
     setFilename(uploadedFilename);
     setUploadError('');
     setSummaryError('');
     setSummaryData(null);
+    setMetrics(extractedMetrics || null);
 
     setSummaryLoading(true);
     try {
+      // Pass health check metrics to summarize API so Gemini generates exact counts
       const response = await fetch('/api/summarize', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sessionId: newSessionId }),
+        body: JSON.stringify({ 
+          sessionId: newSessionId,
+          healthCheckMetrics: extractedMetrics ? {
+            strengths: extractedMetrics.strengths,
+            areasOfOpportunities: extractedMetrics.areasOfOpportunities,
+            actionsRequired: extractedMetrics.actionsRequired,
+          } : undefined,
+        }),
       });
 
       const data = await response.json();
@@ -73,6 +84,7 @@ export default function Home() {
     setSessionId('');
     setFilename('');
     setSummaryData(null);
+    setMetrics(null);
   }, []);
 
   const resetSession = () => {
@@ -81,6 +93,7 @@ export default function Home() {
     setSummaryData(null);
     setSummaryError('');
     setUploadError('');
+    setMetrics(null);
   };
 
   return (
@@ -283,30 +296,48 @@ export default function Home() {
               </div>
             </div>
 
-            {/* Content Area - Fills remaining space */}
-            <div className="flex-1 overflow-hidden px-6 lg:px-8 py-6">
-              <div className="max-w-7xl mx-auto h-full">
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 h-full">
-                  {/* Left: Summary - Fixed container with internal scroll */}
-                  <div className="h-full overflow-hidden flex flex-col">
-                    <Summary
-                      summary={summaryData?.summary || ''}
-                      keyFindings={summaryData?.keyFindings || []}
-                      recommendations={summaryData?.recommendations || []}
-                      riskAreas={summaryData?.riskAreas || []}
-                      isLoading={summaryLoading}
-                      error={summaryError}
-                    />
-                  </div>
-
-                  {/* Right: Chat - Fixed container with internal scroll */}
-                  <div className="h-full overflow-hidden">
-                    <div className="glass-card rounded-2xl h-full flex flex-col">
-                      <ChatInterface
-                        sessionId={sessionId}
-                        reportName={filename}
-                        disabled={!sessionId || summaryLoading}
+            {/* Content Area - Scrollable page */}
+            <div className="flex-1 overflow-y-auto">
+              <div className="px-6 lg:px-8 py-6">
+                <div className="max-w-7xl mx-auto">
+                  {/* Metrics Dashboard - Scrollable with page */}
+                  {metrics && (
+                    <div className="mb-6">
+                      <MetricsDashboard 
+                        metrics={metrics} 
+                        isLoading={summaryLoading}
                       />
+                    </div>
+                  )}
+
+                  {/* Grid with Summary and Chat - Fixed height with internal scroll */}
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                    {/* Left: Summary - Fixed height with internal scroll */}
+                    <div className="overflow-hidden flex flex-col" style={{ height: 'calc(100vh - 280px)' }}>
+                      <Summary
+                        summary={summaryData?.summary || ''}
+                        keyFindings={summaryData?.keyFindings || []}
+                        recommendations={summaryData?.recommendations || []}
+                        riskAreas={summaryData?.riskAreas || []}
+                        isLoading={summaryLoading}
+                        error={summaryError}
+                        healthCheckMetrics={metrics ? {
+                          strengths: metrics.strengths,
+                          areasOfOpportunities: metrics.areasOfOpportunities,
+                          actionsRequired: metrics.actionsRequired,
+                        } : undefined}
+                      />
+                    </div>
+
+                    {/* Right: Chat - Fixed height with internal scroll */}
+                    <div className="overflow-hidden flex flex-col" style={{ height: 'calc(100vh - 280px)' }}>
+                      <div className="glass-card rounded-2xl flex flex-col h-full">
+                        <ChatInterface
+                          sessionId={sessionId}
+                          reportName={filename}
+                          disabled={!sessionId || summaryLoading}
+                        />
+                      </div>
                     </div>
                   </div>
                 </div>

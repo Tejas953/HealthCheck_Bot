@@ -1,10 +1,11 @@
 'use client';
 
 import React, { useState, useRef, useCallback } from 'react';
-import { Upload, FileText, CheckCircle, AlertCircle, Loader2, Sparkles } from 'lucide-react';
+import { Upload, CheckCircle, AlertCircle, Loader2, Sparkles } from 'lucide-react';
+import { HealthCheckMetrics } from '@/utils/types';
 
 interface FileUploadProps {
-  onUploadSuccess: (sessionId: string, filename: string) => void;
+  onUploadSuccess: (sessionId: string, filename: string, metrics?: HealthCheckMetrics) => void;
   onUploadError: (error: string) => void;
   disabled?: boolean;
 }
@@ -63,7 +64,7 @@ export default function FileUpload({ onUploadSuccess, onUploadError, disabled }:
       }
 
       setStatus('success');
-      onUploadSuccess(data.sessionId, file.name);
+      onUploadSuccess(data.sessionId, file.name, data.metrics);
     } catch (error) {
       clearInterval(progressInterval);
       setStatus('error');

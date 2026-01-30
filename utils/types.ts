@@ -64,6 +64,7 @@ export interface UploadResponse {
   chunksCreated: number;
   message: string;
   metrics?: HealthCheckMetrics;
+  reportText?: string; // Report text for client-side storage (serverless compatibility)
 }
 
 export interface SummarizeResponse {

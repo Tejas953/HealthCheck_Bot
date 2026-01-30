@@ -45,6 +45,14 @@ export default function Home() {
 
     setSummaryLoading(true);
     try {
+      // Get report text from sessionStorage for serverless compatibility
+      let reportText: string | undefined;
+      try {
+        reportText = sessionStorage.getItem(`report_${newSessionId}`) || undefined;
+      } catch (storageError) {
+        console.warn('[Page] Failed to read report from sessionStorage:', storageError);
+      }
+
       // Pass health check metrics to summarize API so Gemini generates exact counts
       const response = await fetch('/api/summarize', {
         method: 'POST',
@@ -56,6 +64,7 @@ export default function Home() {
             areasOfOpportunities: extractedMetrics.areasOfOpportunities,
             actionsRequired: extractedMetrics.actionsRequired,
           } : undefined,
+          reportText, // Include report text for serverless compatibility
         }),
       });
 

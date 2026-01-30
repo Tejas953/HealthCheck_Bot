@@ -13,7 +13,7 @@ export async function POST(request: NextRequest): Promise<NextResponse<Summarize
   
   try {
     const body = await request.json();
-    const { sessionId, healthCheckMetrics } = body;
+    const { sessionId, healthCheckMetrics, reportText } = body;
     
     // Store healthCheckMetrics for use in prompt
     const metrics = healthCheckMetrics || {};
@@ -47,11 +47,22 @@ export async function POST(request: NextRequest): Promise<NextResponse<Summarize
       potentialImprovement: totalPotentialImprovement,
     });
 
-    // Get stored report
+    // Try to get report from in-memory store first (for backward compatibility)
     const reportStore = getReportStore();
-    const report = reportStore.get(sessionId);
+    let report = reportStore.get(sessionId);
+    
+    // If not in store, use reportText from request body (serverless compatibility)
+    if (!report && reportText) {
+      console.log('[Summarize] Using reportText from request body (serverless mode)');
+      report = {
+        sessionId,
+        filename: 'report',
+        rawText: reportText,
+        uploadedAt: new Date(),
+      };
+    }
 
-    if (!report) {
+    if (!report || !report.rawText) {
       return NextResponse.json({
         success: false,
         summary: 'Please upload a report first.',
@@ -65,10 +76,10 @@ export async function POST(request: NextRequest): Promise<NextResponse<Summarize
 
     // Truncate report if too long (for faster processing)
     const MAX_REPORT_LENGTH = 60000;
-    let reportText = report.rawText;
-    if (reportText.length > MAX_REPORT_LENGTH) {
-      console.log(`[Summarize] Truncating report from ${reportText.length} to ${MAX_REPORT_LENGTH} chars`);
-      reportText = reportText.substring(0, MAX_REPORT_LENGTH) + '\n[... truncated ...]';
+    let processedReportText = report.rawText;
+    if (processedReportText.length > MAX_REPORT_LENGTH) {
+      console.log(`[Summarize] Truncating report from ${processedReportText.length} to ${MAX_REPORT_LENGTH} chars`);
+      processedReportText = processedReportText.substring(0, MAX_REPORT_LENGTH) + '\n[... truncated ...]';
     }
 
     // Build prompt with exact counts from Health Check metrics
@@ -143,7 +154,7 @@ ${actionsCount ? `- [Generate EXACTLY ${actionsCount} action items - specific th
 - Focus on critical items requiring action
 
 HEALTH CHECK REPORT TO ANALYZE:
-${reportText}`;
+${processedReportText}`;
 
     // Call Gemini
     console.log('[Summarize] Calling Gemini...');

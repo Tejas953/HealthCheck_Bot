@@ -63,6 +63,17 @@ export default function FileUpload({ onUploadSuccess, onUploadError, disabled }:
         throw new Error(data.message || 'Upload failed');
       }
 
+      // Store report text in sessionStorage for serverless compatibility
+      if (data.reportText) {
+        try {
+          sessionStorage.setItem(`report_${data.sessionId}`, data.reportText);
+          sessionStorage.setItem(`report_filename_${data.sessionId}`, file.name);
+          console.log('[FileUpload] Stored report in sessionStorage');
+        } catch (storageError) {
+          console.warn('[FileUpload] Failed to store report in sessionStorage:', storageError);
+        }
+      }
+
       setStatus('success');
       onUploadSuccess(data.sessionId, file.name, data.metrics);
     } catch (error) {

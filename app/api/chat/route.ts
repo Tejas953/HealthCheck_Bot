@@ -61,7 +61,7 @@ const NOT_FOUND_PHRASES = [
 export async function POST(request: NextRequest): Promise<NextResponse<ChatResponse>> {
   try {
     const body = await request.json();
-    const { sessionId, query, conversationHistory = [] } = body;
+    const { sessionId, query, conversationHistory = [], reportText } = body;
 
     console.log(`[Chat] Question: "${query}"`);
 
@@ -105,10 +105,22 @@ export async function POST(request: NextRequest): Promise<NextResponse<ChatRespo
     // ========== STEP 2: CHECK IN REPORT ==========
     console.log('[Chat] Step 2: Searching in report...');
     
+    // Try to get report from in-memory store first (for backward compatibility)
     const reportStore = getReportStore();
-    const report = reportStore.get(sessionId);
+    let report = reportStore.get(sessionId);
+    
+    // If not in store, use reportText from request body (serverless compatibility)
+    if (!report && reportText) {
+      console.log('[Chat] Using reportText from request body (serverless mode)');
+      report = {
+        sessionId,
+        filename: 'report',
+        rawText: reportText,
+        uploadedAt: new Date(),
+      };
+    }
 
-    if (!report) {
+    if (!report || !report.rawText) {
       return NextResponse.json({
         success: false,
         answer: 'Session expired. Please upload the health check report again.',

@@ -185,6 +185,14 @@ export default function ChatInterface({ sessionId, reportName = 'Report', disabl
     });
 
     try {
+      // Get report text from sessionStorage for serverless compatibility
+      let reportText: string | undefined;
+      try {
+        reportText = sessionStorage.getItem(`report_${sessionId}`) || undefined;
+      } catch (storageError) {
+        console.warn('[ChatInterface] Failed to read report from sessionStorage:', storageError);
+      }
+
       const response = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -192,6 +200,7 @@ export default function ChatInterface({ sessionId, reportName = 'Report', disabl
           sessionId,
           query: messageText.trim(),
           conversationHistory: messages.slice(-6).map(m => ({ role: m.role, content: m.content })),
+          reportText, // Include report text for serverless compatibility
         }),
         signal: abortController.signal,
       });

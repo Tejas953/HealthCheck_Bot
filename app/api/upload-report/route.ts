@@ -155,12 +155,14 @@ export async function POST(request: NextRequest): Promise<NextResponse<UploadRes
     }
     console.log(`[Upload] Final extracted metrics:`, metrics);
 
-    // Store the report
+    // Store the report (for backward compatibility and local dev)
     const reportStore = getReportStore();
     reportStore.store(sessionId, file.name, parsedDocument.rawText);
 
     console.log(`[Upload] Successfully processed ${file.name}: ${parsedDocument.rawText.length} characters`);
 
+    // Return report text to client for client-side storage (works in serverless environments)
+    // Client will store this in sessionStorage and send it with subsequent requests
     return NextResponse.json({
       success: true,
       sessionId,
@@ -168,6 +170,7 @@ export async function POST(request: NextRequest): Promise<NextResponse<UploadRes
       chunksCreated: 1,
       message: 'Report uploaded and processed successfully',
       metrics, // Include extracted metrics
+      reportText: parsedDocument.rawText, // Include report text for client-side storage
     });
 
   } catch (error) {

@@ -50,12 +50,13 @@ export default function Summary({
     const oppsCount = healthCheckMetrics?.areasOfOpportunities ?? riskAreas.length;
     const actionsCount = healthCheckMetrics?.actionsRequired ?? recommendations.length;
     
+    const summaryBullets = summary.split('\n').filter(line => line.trim().length > 0);
     const text = `
 HEALTH CHECK ANALYSIS REPORT
 ============================
 
 OVERVIEW:
-${summary}
+${summaryBullets.map(point => `• ${point.trim()}`).join('\n')}
 
 METRICS SUMMARY:
 • Strengths: ${strengthsCount} (Well configured)
@@ -239,9 +240,16 @@ ${recommendations.map(r => `! ${r}`).join('\n')}
                     </div>
                     <h3 className="font-semibold text-white">Client Feedback</h3>
                   </div>
-                  <p className="text-gray-300 leading-relaxed whitespace-pre-wrap text-sm">
-                    {summary}
-                  </p>
+                  <ul className="space-y-3">
+                    {summary.split('\n').filter(line => line.trim().length > 0).map((point, index) => (
+                      <li key={index} className="flex items-start gap-3 p-3 rounded-lg bg-indigo-500/5 border border-indigo-500/10">
+                        <span className="w-6 h-6 rounded-full bg-indigo-500/20 flex items-center justify-center flex-shrink-0 mt-0.5 border border-indigo-500/30">
+                          <FileText className="w-3.5 h-3.5 text-indigo-400" />
+                        </span>
+                        <span className="text-gray-300 text-sm leading-relaxed flex-1">{point.trim()}</span>
+                      </li>
+                    ))}
+                  </ul>
                 </div>
               )}
             </div>
